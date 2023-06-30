@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::points::XYPoint;
+use std::collections::HashMap;
 
 pub fn find_clusters_hotspot2d(
     points: Vec<XYPoint<f64>>,
@@ -11,72 +11,90 @@ pub fn find_clusters_hotspot2d(
     let map1 = hist2d(&quantized1);
     let labels1 = label_cluster_map(&quantized1, map1, min_cluster_size);
 
-    let points2 = &points.iter().map(|p| XYPoint {
-	x: p.x + eps / 2.0,
-	y: p.y,
-    }).collect::<Vec<_>>();
+    let points2 = &points
+        .iter()
+        .map(|p| XYPoint {
+            x: p.x + eps / 2.0,
+            y: p.y,
+        })
+        .collect::<Vec<_>>();
     let quantized2 = quantize(points2, eps);
     let map2 = hist2d(&quantized2);
     let labels2 = label_cluster_map(&quantized2, map2, min_cluster_size);
 
-    let points3 = &points.iter().map(|p| XYPoint {
-	x: p.x,
-	y: p.y + eps / 2.0,
-    }).collect::<Vec<_>>();
+    let points3 = &points
+        .iter()
+        .map(|p| XYPoint {
+            x: p.x,
+            y: p.y + eps / 2.0,
+        })
+        .collect::<Vec<_>>();
     let quantized3 = quantize(points3, eps);
     let map3 = hist2d(&quantized3);
     let labels3 = label_cluster_map(&quantized3, map3, min_cluster_size);
 
-    let points4 = &points.iter().map(|p| XYPoint {
-	x: p.x + eps / 2.0,
-	y: p.y + eps / 2.0,
-    }).collect::<Vec<_>>();
+    let points4 = &points
+        .iter()
+        .map(|p| XYPoint {
+            x: p.x + eps / 2.0,
+            y: p.y + eps / 2.0,
+        })
+        .collect::<Vec<_>>();
     let quantized4 = quantize(points4, eps);
     let map4 = hist2d(&quantized4);
-    let labels4 = label_cluster_map(&quantized4, map4, min_cluster_size);    
+    let labels4 = label_cluster_map(&quantized4, map4, min_cluster_size);
 
     merge_cluster_labels(&labels1, &labels2, &labels3, &labels4)
 }
 
-pub fn merge_cluster_labels(l1: &Vec<i32>, l2: &Vec<i32>, l3: &Vec<i32>, l4: &Vec<i32>) -> Vec<i32> {
-	let mut labels = vec![0; l1.len()];
-	for (i, l) in l1.iter().enumerate() {
-	    if *l != -1 {
-		labels[i] = *l;
-	    } else if l2[i] != -1 {
-		labels[i] = l2[i];
-	    } else if l3[i] != -1 {
-		labels[i] = l3[i];
-	    } else if l4[i] != -1 {
-		labels[i] = l4[i];
-	    } else {
-		labels[i] = -1;
-	    }
-	}
-	labels
+pub fn merge_cluster_labels(
+    l1: &Vec<i32>,
+    l2: &Vec<i32>,
+    l3: &Vec<i32>,
+    l4: &Vec<i32>,
+) -> Vec<i32> {
+    let mut labels = vec![0; l1.len()];
+    for (i, l) in l1.iter().enumerate() {
+        if *l != -1 {
+            labels[i] = *l;
+        } else if l2[i] != -1 {
+            labels[i] = l2[i];
+        } else if l3[i] != -1 {
+            labels[i] = l3[i];
+        } else if l4[i] != -1 {
+            labels[i] = l4[i];
+        } else {
+            labels[i] = -1;
+        }
+    }
+    labels
 }
 
 /// Mark points as belonging to a cluster. A value of -1 means the
 /// point is not in a cluster.
-/// 
-pub fn label_cluster_map(points: &Vec<XYPoint<i64>>, cluster_map: HashMap<XYPoint<i64>, Vec<usize>>, min_size: usize) -> Vec<i32> {
+///
+pub fn label_cluster_map(
+    points: &Vec<XYPoint<i64>>,
+    cluster_map: HashMap<XYPoint<i64>, Vec<usize>>,
+    min_size: usize,
+) -> Vec<i32> {
     let mut labels = vec![0; points.len()];
     let mut label_map = HashMap::new();
     let mut label = 0;
     cluster_map.iter().for_each(|(p, v)| {
-	if v.len() >= min_size {
-	    label_map.insert(p, label);
-	    label += 1;
-	}
+        if v.len() >= min_size {
+            label_map.insert(p, label);
+            label += 1;
+        }
     });
-				
+
     for (i, p) in points.iter().enumerate() {
-	let v = label_map.get(p);
-	if let Some(group) = v {
-	    labels[i] = *group;
-	} else {
-	    labels[i] = -1;
-	}
+        let v = label_map.get(p);
+        if let Some(group) = v {
+            labels[i] = *group;
+        } else {
+            labels[i] = -1;
+        }
     }
     labels
 }
@@ -103,7 +121,6 @@ pub fn quantize(points: &Vec<XYPoint<f64>>, quantum: f64) -> Vec<XYPoint<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn test_quantize() {

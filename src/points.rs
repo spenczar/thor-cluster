@@ -10,4 +10,3 @@ impl<T> XYPoint<T> {
         Self { x, y }
     }
 }
-

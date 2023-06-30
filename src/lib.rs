@@ -1,4 +1,6 @@
-use pyo3::prelude::{pyfunction, pymodule, PyAny, PyErr, PyModule, PyObject, PyResult, Python, pyclass, Py};
+use pyo3::prelude::{
+    pyclass, pyfunction, pymodule, Py, PyAny, PyErr, PyModule, PyObject, PyResult, Python,
+};
 use pyo3::types::{PyFloat, PyInt};
 use pyo3::wrap_pyfunction;
 
@@ -7,11 +9,11 @@ use arrow::error::ArrowError;
 use arrow::pyarrow::{FromPyArrow, PyArrowException, ToPyArrow};
 
 mod dbscan;
-pub mod points;
 mod hotspot2d;
+pub mod points;
 
 pub use points::XYPoint;
-    
+
 fn to_py_err(err: ArrowError) -> PyErr {
     PyArrowException::new_err(err.to_string())
 }
@@ -83,7 +85,7 @@ fn find_clusters_py(
         .collect::<Vec<_>>();
 
     let cluster_labels = find_clusters(points, eps, min_cluster_size, alg);
-    
+
     // Convert the clusters into an arrow list of uint32 arrays.
     let mut builder = Int32Builder::new();
     builder.append_slice(&cluster_labels[..]);
@@ -91,15 +93,19 @@ fn find_clusters_py(
     la.to_data().to_pyarrow(py)
 }
 
-
-pub fn find_clusters(points: Vec<XYPoint<f64>>, eps: f64, min_cluster_size: usize, alg: ClusterAlgorithm) -> Vec<i32> {
+pub fn find_clusters(
+    points: Vec<XYPoint<f64>>,
+    eps: f64,
+    min_cluster_size: usize,
+    alg: ClusterAlgorithm,
+) -> Vec<i32> {
     match alg {
-	ClusterAlgorithm::DBSCAN => dbscan::find_clusters_dbscan(points, eps, min_cluster_size),
-	ClusterAlgorithm::Hotspot2D => hotspot2d::find_clusters_hotspot2d(points, eps, min_cluster_size),
+        ClusterAlgorithm::DBSCAN => dbscan::find_clusters_dbscan(points, eps, min_cluster_size),
+        ClusterAlgorithm::Hotspot2D => {
+            hotspot2d::find_clusters_hotspot2d(points, eps, min_cluster_size)
+        }
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -118,10 +124,8 @@ mod tests {
             XYPoint::new(2.0, 0.0),
         ];
         let clusters = find_clusters(points, 1.0, 4, ClusterAlgorithm::Hotspot2D);
-	let expect = vec![
-	    -1, -1, -1, -1, 0, 0, 0, 0
-	];
-	assert_eq!(clusters, expect);
+        let expect = vec![-1, -1, -1, -1, 0, 0, 0, 0];
+        assert_eq!(clusters, expect);
     }
 
     #[test]
@@ -137,15 +141,8 @@ mod tests {
             XYPoint::new(2.0, 0.0),
         ];
         let clusters = find_clusters(points, 1.0, 4, ClusterAlgorithm::DBSCAN);
-	let allowed = vec![
-	    vec![
-		1, 1, 1, 1, 2, 2, 2, 2
-	    ],
-	    vec![
-		2, 2, 2, 2, 1, 1, 1, 1
-	    ],
-	];
-	assert!(allowed.contains(&clusters));
+        let allowed = vec![vec![1, 1, 1, 1, 2, 2, 2, 2], vec![2, 2, 2, 2, 1, 1, 1, 1]];
+        assert!(allowed.contains(&clusters));
     }
 
     #[test]
@@ -161,15 +158,8 @@ mod tests {
             XYPoint::new(2.0, 0.0),
         ];
         let clusters = find_clusters(points, 1.0, 2, ClusterAlgorithm::DBSCAN);
-	let allowed = vec![
-	    vec![
-		1, 1, 1, 1, 2, 2, 2, 2
-	    ],
-	    vec![
-		2, 2, 2, 2, 1, 1, 1, 1
-	    ],
-	];
-	assert!(allowed.contains(&clusters));
+        let allowed = vec![vec![1, 1, 1, 1, 2, 2, 2, 2], vec![2, 2, 2, 2, 1, 1, 1, 1]];
+        assert!(allowed.contains(&clusters));
     }
 }
 
