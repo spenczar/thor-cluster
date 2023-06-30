@@ -1,6 +1,4 @@
-# hotspot2d in rust
-
-## Not tested enough to trust!!!b
+# clustering thor datapoints in rust
 
 Input/output are arrow arrays
 
@@ -18,6 +16,7 @@ thor_cluster.find_clusters(xs, ys, eps=0.02, min_sample=4)
 
 Approx runtime on M1 macbook:
 
+## Hotspot2D
 
 ### `min_sample=4`
 
@@ -43,3 +42,18 @@ Approx runtime on M1 macbook:
 
 thor_cluster is pretty much linear in the size of the dataset, while
 thor is quadratic.
+
+
+## DBSCAN
+
+### `min_sample=5`
+
+| n observations | thor_cluster (ms) | thor (ms) |
+|----------------|-------------------|-----------|
+| 100            | 0.25              | 0.6       |
+| 1000           | 1.87              | 0.8       |
+| 10000          | 182.2             | 10.7      |
+| 30000          | 1,614             | 31.5      |
+| 50000          | 4,493             | 56.7      |
+| 70000          | i dare not try    | 86        |
+

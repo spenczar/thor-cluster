@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-
-use pyo3::prelude::{pyfunction, pymodule, PyAny, PyErr, PyModule, PyObject, PyResult, Python};
+use dbscan::{cluster};
+use pyo3::prelude::{pyfunction, pymodule, PyAny, PyErr, PyModule, PyObject, PyResult, Python, pyclass, Py};
 use pyo3::types::{PyFloat, PyInt};
 use pyo3::wrap_pyfunction;
 
@@ -25,6 +25,13 @@ impl<T> XYPoint<T> {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+#[pyclass]
+pub enum ClusterAlgorithm {
+    DBSCAN = 1,
+    Hotspot2D = 2,
+}
+
 /// Find clusters of related x-y points.
 ///
 /// # Arguments
@@ -44,8 +51,10 @@ fn find_clusters_py(
     ys: &PyAny,
     eps: &PyFloat,
     min_cluster_size: &PyInt,
+    alg: Py<ClusterAlgorithm>,
     py: Python,
 ) -> PyResult<PyObject> {
+    // Handle the Python-to-rust conversion up front
     let xs = make_array(ArrayData::from_pyarrow(xs)?);
 
     let xs = xs
@@ -70,6 +79,7 @@ fn find_clusters_py(
 
     let eps = eps.extract::<f64>()?;
     let min_cluster_size = min_cluster_size.extract::<u8>()? as usize;
+    let alg = alg.extract::<ClusterAlgorithm>(py)?;
 
     // Turn xs and ys into Vec<XYPoint> for easier processing.
     let points = xs
@@ -80,8 +90,9 @@ fn find_clusters_py(
             y: y.unwrap_or(0.0),
         })
         .collect::<Vec<_>>();
-    let cluster_labels = find_clusters(points, eps, min_cluster_size);
 
+    let cluster_labels = find_clusters(points, eps, min_cluster_size, alg);
+    
     // Convert the clusters into an arrow list of uint32 arrays.
     let mut builder = Int32Builder::new();
     builder.append_slice(&cluster_labels[..]);
@@ -89,7 +100,29 @@ fn find_clusters_py(
     la.to_data().to_pyarrow(py)
 }
 
-pub fn find_clusters(
+
+pub fn find_clusters(points: Vec<XYPoint<f64>>, eps: f64, min_cluster_size: usize, alg: ClusterAlgorithm) -> Vec<i32> {
+    match alg {
+	ClusterAlgorithm::DBSCAN => find_clusters_dbscan(points, eps, min_cluster_size),
+	ClusterAlgorithm::Hotspot2D => find_clusters_hotspot2d(points, eps, min_cluster_size),
+    }
+}
+
+fn find_clusters_dbscan(points: Vec<XYPoint<f64>>, eps: f64, min_cluster_size: usize) -> Vec<i32> {
+    let points_vec = points.iter().map(|p| vec![p.x, p.y]).collect::<Vec<_>>();
+    let classifications = dbscan::cluster(eps, min_cluster_size, &points_vec);
+    let mut result = Vec::with_capacity(classifications.len());
+    for (idx, c) in classifications.iter().enumerate() {
+	if let dbscan::Classification::Core(i) = c {
+	    result.push(*i as i32);
+	} else {
+	    result.push(-1);
+	}
+    }
+    result
+}
+
+fn find_clusters_hotspot2d(
     points: Vec<XYPoint<f64>>,
     eps: f64,
     min_cluster_size: usize,
@@ -204,7 +237,7 @@ mod tests {
             XYPoint::new(2.0, 0.0),
             XYPoint::new(2.0, 0.0),
         ];
-        let clusters = find_clusters(points, 1.0, 4);
+        let clusters = find_clusters(points, 1.0, 4, ClusterAlgorithm::Hotspot2D);
 	let expect = vec![
 	    -1, -1, -1, -1, 0, 0, 0, 0
 	];
@@ -223,7 +256,7 @@ mod tests {
             XYPoint::new(2.0, 0.0),
             XYPoint::new(2.0, 0.0),
         ];
-        let clusters = find_clusters(points, 1.0, 4);
+        let clusters = find_clusters(points, 1.0, 4, ClusterAlgorithm::DBSCAN);
 	let allowed = vec![
 	    vec![
 		0, 0, 0, 0, 1, 1, 1, 1
@@ -247,7 +280,7 @@ mod tests {
             XYPoint::new(2.0, 0.0),
             XYPoint::new(2.0, 0.0),
         ];
-        let clusters = find_clusters(points, 1.0, 2);
+        let clusters = find_clusters(points, 1.0, 2, ClusterAlgorithm::DBSCAN);
 	let allowed = vec![
 	    vec![
 		0, 0, 0, 0, 1, 1, 1, 1
@@ -352,5 +385,6 @@ mod tests {
 #[pymodule]
 fn thor_cluster(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_clusters_py, m)?)?;
+    m.add_class::<ClusterAlgorithm>()?;
     Ok(())
 }
