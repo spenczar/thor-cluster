@@ -7,7 +7,7 @@ use arrow::error::ArrowError;
 use arrow::pyarrow::{FromPyArrow, PyArrowException, ToPyArrow};
 
 mod dbscan;
-mod points;
+pub mod points;
 mod hotspot2d;
 
 pub use points::XYPoint;
@@ -139,10 +139,10 @@ mod tests {
         let clusters = find_clusters(points, 1.0, 4, ClusterAlgorithm::DBSCAN);
 	let allowed = vec![
 	    vec![
-		0, 0, 0, 0, 1, 1, 1, 1
+		1, 1, 1, 1, 2, 2, 2, 2
 	    ],
 	    vec![
-		1, 1, 1, 1, 0, 0, 0, 0
+		2, 2, 2, 2, 1, 1, 1, 1
 	    ],
 	];
 	assert!(allowed.contains(&clusters));
@@ -163,10 +163,10 @@ mod tests {
         let clusters = find_clusters(points, 1.0, 2, ClusterAlgorithm::DBSCAN);
 	let allowed = vec![
 	    vec![
-		0, 0, 0, 0, 1, 1, 1, 1
+		1, 1, 1, 1, 2, 2, 2, 2
 	    ],
 	    vec![
-		1, 1, 1, 1, 0, 0, 0, 0
+		2, 2, 2, 2, 1, 1, 1, 1
 	    ],
 	];
 	assert!(allowed.contains(&clusters));
