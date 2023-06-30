@@ -60,6 +60,25 @@ fn criterion_benchmark(c: &mut Criterion) {
         });
     }
     group.finish();
+
+    let mut group = c.benchmark_group("find_clusters_rtree");
+    for size in [10, 100, 1000, 10000, 30000, 50000, 70000].iter() {
+        group.throughput(Throughput::Elements(*size as u64));
+        group.sample_size(10);
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
+            let mut points_n = points.clone();
+            points_n.truncate(size);
+            b.iter(|| {
+                black_box(find_clusters(
+                    black_box(points_n.clone()),
+                    0.02,
+                    4,
+                    ClusterAlgorithm::DbscanRStar,
+                ))
+            });
+        });
+    }
+    group.finish();
 }
 
 criterion_group!(benches, criterion_benchmark);

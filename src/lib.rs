@@ -11,6 +11,9 @@ use arrow::pyarrow::{FromPyArrow, PyArrowException, ToPyArrow};
 mod dbscan;
 mod hotspot2d;
 pub mod points;
+use dbscan::fixed16_kdtree;
+use dbscan::float32_kdtree;
+use dbscan::rstar;
 
 pub use points::XYPoint;
 
@@ -23,6 +26,8 @@ fn to_py_err(err: ArrowError) -> PyErr {
 pub enum ClusterAlgorithm {
     DBSCAN = 1,
     Hotspot2D = 2,
+    DbscanRStar = 3,
+    DbscanFixed16 = 4,
 }
 
 /// Find clusters of related x-y points.
@@ -100,9 +105,17 @@ pub fn find_clusters(
     alg: ClusterAlgorithm,
 ) -> Vec<i32> {
     match alg {
-        ClusterAlgorithm::DBSCAN => dbscan::find_clusters_dbscan(points, eps, min_cluster_size),
         ClusterAlgorithm::Hotspot2D => {
             hotspot2d::find_clusters_hotspot2d(points, eps, min_cluster_size)
+        }
+        ClusterAlgorithm::DBSCAN => {
+            dbscan::find_clusters::<float32_kdtree::PointTree>(points, eps, min_cluster_size)
+        }
+        ClusterAlgorithm::DbscanRStar => {
+            dbscan::find_clusters::<rstar::Tree>(points, eps, min_cluster_size)
+        }
+        ClusterAlgorithm::DbscanFixed16 => {
+            dbscan::find_clusters::<fixed16_kdtree::FixedPointTree>(points, eps, min_cluster_size)
         }
     }
 }
