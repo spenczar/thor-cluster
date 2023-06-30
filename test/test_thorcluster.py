@@ -23,7 +23,7 @@ def test_thorcluster_benchmark(benchmark, benchmark_data, n):
 
 @pytest.fixture(scope="session")
 def benchmark_data():
-    datafile = "./testdata/one_cluster_iteration.csv"
+    datafile = "./testdata/cluster_input.csv"
     with open(datafile, "r") as f:
         reader = csv.reader(f)
         next(reader)

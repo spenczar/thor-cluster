@@ -12,6 +12,19 @@ fn to_py_err(err: ArrowError) -> PyErr {
     PyArrowException::new_err(err.to_string())
 }
 
+/// A point in 2D space.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct XYPoint<T> {
+    x: T,
+    y: T,
+}
+
+impl<T> XYPoint<T> {
+	pub fn new(x: T, y: T) -> Self {
+		Self { x, y }
+	}
+}
+
 /// Find clusters of related x-y points.
 ///
 /// # Arguments
@@ -68,7 +81,7 @@ fn find_clusters_py(
         })
         .collect::<Vec<_>>();
 
-    let quantized = quantize(points, eps);
+    let quantized = quantize(&points, eps);
     let map = hist2d(quantized);
     let mut builder = ListBuilder::new(UInt32Builder::new());
     for v in map.values() {
@@ -83,7 +96,7 @@ fn find_clusters_py(
     la.to_data().to_pyarrow(py)
 }
 
-fn hist2d(points: Vec<XYPoint<i64>>) -> HashMap<XYPoint<i64>, Vec<usize>> {
+pub fn hist2d(points: Vec<XYPoint<i64>>) -> HashMap<XYPoint<i64>, Vec<usize>> {
     let mut map = HashMap::new();
     for (i, p) in points.iter().enumerate() {
         map.entry(*p).or_insert_with(Vec::new).push(i);
@@ -92,7 +105,7 @@ fn hist2d(points: Vec<XYPoint<i64>>) -> HashMap<XYPoint<i64>, Vec<usize>> {
 }
 
 /// Quantize points to a grid.
-fn quantize(points: Vec<XYPoint<f64>>, quantum: f64) -> Vec<XYPoint<i64>> {
+pub fn quantize(points: &Vec<XYPoint<f64>>, quantum: f64) -> Vec<XYPoint<i64>> {
     points
         .iter()
         .map(|p| XYPoint {
@@ -102,33 +115,97 @@ fn quantize(points: Vec<XYPoint<f64>>, quantum: f64) -> Vec<XYPoint<i64>> {
         .collect()
 }
 
-/// A point in 2D space.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-struct XYPoint<T> {
-    x: T,
-    y: T,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[test]
-fn test_quantize() {
-    let points = vec![
-        XYPoint { x: 0.0, y: 0.0 },
-        XYPoint { x: 0.4, y: 0.4 },
-        XYPoint { x: 1.0, y: 1.0 },
-        XYPoint { x: 1.6, y: 1.6 },
-        XYPoint { x: 2.0, y: 2.0 },
-    ];
-    let quantized = quantize(points, 1.0);
-    assert_eq!(
-        quantized,
-        vec![
+    #[test]
+    fn test_quantize() {
+        let points = vec![
+            XYPoint { x: 0.0, y: 0.0 },
+            XYPoint { x: 0.4, y: 0.4 },
+            XYPoint { x: 1.0, y: 1.0 },
+            XYPoint { x: 1.6, y: 1.6 },
+            XYPoint { x: 2.0, y: 2.0 },
+        ];
+        let quantized = quantize(&points, 1.0);
+        assert_eq!(
+            quantized,
+            vec![
+                XYPoint { x: 0, y: 0 },
+                XYPoint { x: 0, y: 0 },
+                XYPoint { x: 1, y: 1 },
+                XYPoint { x: 2, y: 2 },
+                XYPoint { x: 2, y: 2 },
+            ]
+        );
+
+        let quantized = quantize(&points, 0.5);
+        assert_eq!(
+            quantized,
+            vec![
+                XYPoint { x: 0, y: 0 },
+                XYPoint { x: 1, y: 1 },
+                XYPoint { x: 2, y: 2 },
+                XYPoint { x: 3, y: 3 },
+                XYPoint { x: 4, y: 4 },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_quantize_negative() {
+        let points = vec![
+            XYPoint { x: -1.4, y: -1.4 },
+            XYPoint { x: -0.1, y: -0.1 },
+            XYPoint { x: 0.0, y: 0.0 },
+            XYPoint { x: 0.1, y: 0.1 },
+            XYPoint { x: 0.4, y: 0.4 },
+            XYPoint { x: 1.0, y: 1.0 },
+        ];
+        let quantized = quantize(&points, 1.0);
+        assert_eq!(
+            quantized,
+            vec![
+                XYPoint { x: -1, y: -1 },
+                XYPoint { x: 0, y: 0 },
+                XYPoint { x: 0, y: 0 },
+                XYPoint { x: 0, y: 0 },
+                XYPoint { x: 0, y: 0 },
+                XYPoint { x: 1, y: 1 },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_quantize_empty() {
+        let points = vec![];
+        let quantized = quantize(&points, 1.0);
+        assert_eq!(quantized, vec![]);
+    }
+
+    #[test]
+    fn test_hist2d() {
+        let points = vec![
             XYPoint { x: 0, y: 0 },
             XYPoint { x: 0, y: 0 },
             XYPoint { x: 1, y: 1 },
             XYPoint { x: 2, y: 2 },
             XYPoint { x: 2, y: 2 },
-        ]
-    );
+        ];
+        let map = hist2d(points);
+        assert_eq!(map.len(), 3);
+        assert_eq!(map[&XYPoint { x: 0, y: 0 }], vec![0, 1]);
+        assert_eq!(map[&XYPoint { x: 1, y: 1 }], vec![2]);
+        assert_eq!(map[&XYPoint { x: 2, y: 2 }], vec![3, 4]);
+    }
+
+    #[test]
+    fn test_hist2d_empty() {
+        let points = vec![];
+        let map = hist2d(points);
+        assert_eq!(map.len(), 0);
+    }
 }
 
 /// A Python module implemented in Rust.
