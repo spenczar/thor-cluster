@@ -4,7 +4,7 @@ use pyo3::prelude::{pyfunction, pymodule, PyAny, PyErr, PyModule, PyObject, PyRe
 use pyo3::types::{PyFloat, PyInt};
 use pyo3::wrap_pyfunction;
 
-use arrow::array::{make_array, Array, ArrayData, Float64Array, ListBuilder, UInt32Builder};
+use arrow::array::{make_array, Array, ArrayData, Float64Array, Int32Builder};
 use arrow::error::ArrowError;
 use arrow::pyarrow::{FromPyArrow, PyArrowException, ToPyArrow};
 
@@ -20,9 +20,9 @@ pub struct XYPoint<T> {
 }
 
 impl<T> XYPoint<T> {
-	pub fn new(x: T, y: T) -> Self {
-		Self { x, y }
-	}
+    pub fn new(x: T, y: T) -> Self {
+        Self { x, y }
+    }
 }
 
 /// Find clusters of related x-y points.
@@ -80,23 +80,96 @@ fn find_clusters_py(
             y: y.unwrap_or(0.0),
         })
         .collect::<Vec<_>>();
+    let cluster_labels = find_clusters(points, eps, min_cluster_size);
 
-    let quantized = quantize(&points, eps);
-    let map = hist2d(quantized);
-    let mut builder = ListBuilder::new(UInt32Builder::new());
-    for v in map.values() {
-        if v.len() >= min_cluster_size {
-            for i in v {
-                builder.values().append_value(*i as u32);
-            }
-            builder.append(true);
-        }
-    }
+    // Convert the clusters into an arrow list of uint32 arrays.
+    let mut builder = Int32Builder::new();
+    builder.append_slice(&cluster_labels[..]);
     let la = builder.finish();
     la.to_data().to_pyarrow(py)
 }
 
-pub fn hist2d(points: Vec<XYPoint<i64>>) -> HashMap<XYPoint<i64>, Vec<usize>> {
+pub fn find_clusters(
+    points: Vec<XYPoint<f64>>,
+    eps: f64,
+    min_cluster_size: usize,
+) -> Vec<i32> {
+    // Run 4 times with different quantization to catch near misses.
+    let quantized1 = quantize(&points, eps);
+    let map1 = hist2d(&quantized1);
+    let labels1 = label_cluster_map(&quantized1, map1, min_cluster_size);
+
+    let points2 = &points.iter().map(|p| XYPoint {
+	x: p.x + eps / 2.0,
+	y: p.y,
+    }).collect::<Vec<_>>();
+    let quantized2 = quantize(points2, eps);
+    let map2 = hist2d(&quantized2);
+    let labels2 = label_cluster_map(&quantized2, map2, min_cluster_size);
+
+    let points3 = &points.iter().map(|p| XYPoint {
+	x: p.x,
+	y: p.y + eps / 2.0,
+    }).collect::<Vec<_>>();
+    let quantized3 = quantize(points3, eps);
+    let map3 = hist2d(&quantized3);
+    let labels3 = label_cluster_map(&quantized3, map3, min_cluster_size);
+
+    let points4 = &points.iter().map(|p| XYPoint {
+	x: p.x + eps / 2.0,
+	y: p.y + eps / 2.0,
+    }).collect::<Vec<_>>();
+    let quantized4 = quantize(points4, eps);
+    let map4 = hist2d(&quantized4);
+    let labels4 = label_cluster_map(&quantized4, map4, min_cluster_size);    
+
+    merge_cluster_labels(&labels1, &labels2, &labels3, &labels4)
+}
+
+pub fn merge_cluster_labels(l1: &Vec<i32>, l2: &Vec<i32>, l3: &Vec<i32>, l4: &Vec<i32>) -> Vec<i32> {
+	let mut labels = vec![0; l1.len()];
+	for (i, l) in l1.iter().enumerate() {
+	    if *l != -1 {
+		labels[i] = *l;
+	    } else if l2[i] != -1 {
+		labels[i] = l2[i];
+	    } else if l3[i] != -1 {
+		labels[i] = l3[i];
+	    } else if l4[i] != -1 {
+		labels[i] = l4[i];
+	    } else {
+		labels[i] = -1;
+	    }
+	}
+	labels
+}
+
+/// Mark points as belonging to a cluster. A value of -1 means the
+/// point is not in a cluster.
+/// 
+pub fn label_cluster_map(points: &Vec<XYPoint<i64>>, cluster_map: HashMap<XYPoint<i64>, Vec<usize>>, min_size: usize) -> Vec<i32> {
+    let mut labels = vec![0; points.len()];
+    let mut label_map = HashMap::new();
+    let mut label = 0;
+    cluster_map.iter().for_each(|(p, v)| {
+	if v.len() >= min_size {
+	    label_map.insert(p, label);
+	    label += 1;
+	}
+    });
+				
+    for (i, p) in points.iter().enumerate() {
+	let v = label_map.get(p);
+	if let Some(group) = v {
+	    labels[i] = *group;
+	} else {
+	    labels[i] = -1;
+	}
+    }
+    labels
+}
+
+pub fn hist2d(points: &Vec<XYPoint<i64>>) -> HashMap<XYPoint<i64>, Vec<usize>> {
     let mut map = HashMap::new();
     for (i, p) in points.iter().enumerate() {
         map.entry(*p).or_insert_with(Vec::new).push(i);
@@ -118,6 +191,73 @@ pub fn quantize(points: &Vec<XYPoint<f64>>, quantum: f64) -> Vec<XYPoint<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_find_clusters_near_miss() {
+        let points = vec![
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(1.0, 1.0),
+            XYPoint::new(2.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+        ];
+        let clusters = find_clusters(points, 1.0, 4);
+	let expect = vec![
+	    -1, -1, -1, -1, 0, 0, 0, 0
+	];
+	assert_eq!(clusters, expect);
+    }
+
+    #[test]
+    fn test_find_clusters_two_hits() {
+        let points = vec![
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+        ];
+        let clusters = find_clusters(points, 1.0, 4);
+	let allowed = vec![
+	    vec![
+		0, 0, 0, 0, 1, 1, 1, 1
+	    ],
+	    vec![
+		1, 1, 1, 1, 0, 0, 0, 0
+	    ],
+	];
+	assert!(allowed.contains(&clusters));
+    }
+
+    #[test]
+    fn test_find_clusters_bigger_than_min() {
+        let points = vec![
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(1.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+            XYPoint::new(2.0, 0.0),
+        ];
+        let clusters = find_clusters(points, 1.0, 2);
+	let allowed = vec![
+	    vec![
+		0, 0, 0, 0, 1, 1, 1, 1
+	    ],
+	    vec![
+		1, 1, 1, 1, 0, 0, 0, 0
+	    ],
+	];
+	assert!(allowed.contains(&clusters));
+    }
 
     #[test]
     fn test_quantize() {
@@ -193,7 +333,7 @@ mod tests {
             XYPoint { x: 2, y: 2 },
             XYPoint { x: 2, y: 2 },
         ];
-        let map = hist2d(points);
+        let map = hist2d(&points);
         assert_eq!(map.len(), 3);
         assert_eq!(map[&XYPoint { x: 0, y: 0 }], vec![0, 1]);
         assert_eq!(map[&XYPoint { x: 1, y: 1 }], vec![2]);
@@ -203,7 +343,7 @@ mod tests {
     #[test]
     fn test_hist2d_empty() {
         let points = vec![];
-        let map = hist2d(points);
+        let map = hist2d(&points);
         assert_eq!(map.len(), 0);
     }
 }

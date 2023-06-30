@@ -7,11 +7,11 @@ def test_thorcluster():
     x = pa.array([1.0, 2.0, 3.0, 1.0, 1.0, 1.0], type=pa.float64())
     y = pa.array([4.0, 5.0, 6.0, 4.1, 3.9, 3.8], type=pa.float64())
     have = thor_cluster.find_clusters(x, y, 1.0, 4)
-    want = pa.array([[0, 3, 4, 5]], type=pa.list_(pa.uint32()))
+    want = pa.array([0, -1, -1, 0, 0, 0], type=pa.int32())
     assert have == (want)
 
 
-@pytest.mark.parametrize("n", [10, 100, 1000, 10000, 20000, 30000, 40000, 50000])
+@pytest.mark.parametrize("n", [100, 1000, 10000, 30000, 50000, 70000])
 @pytest.mark.benchmark(group="thorcluster")
 def test_thorcluster_benchmark(benchmark, benchmark_data, n):
     data = benchmark_data
