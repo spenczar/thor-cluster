@@ -7,8 +7,6 @@ use thor_cluster::{find_clusters, ClusterAlgorithm};
 struct TestDataRow {
     x: f64,
     y: f64,
-    dt: f64,
-    obs_ids: i64,
 }
 
 fn load_testdata() -> Vec<XYPoint<f64>> {
