@@ -870,8 +870,6 @@ name = "thor-cluster"
 version = "0.1.0"
 dependencies = [
  "arrow",
- "arrow-ord",
- "arrow-row",
  "libc",
  "pyo3",
 ]
