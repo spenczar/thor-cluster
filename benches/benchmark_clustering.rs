@@ -1,8 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use serde;
+use thor_cluster::gridsearch::cluster_grid_search;
 use thor_cluster::points::{XYPoint, XYTPoint};
 use thor_cluster::{find_clusters, ClusterAlgorithm};
-use thor_cluster::gridsearch::cluster_grid_search;
 
 #[derive(Debug, serde::Deserialize)]
 struct TestDataRow {
@@ -101,22 +101,22 @@ fn criterion_benchmark(c: &mut Criterion) {
         group.sample_size(10);
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             let mut points_n = points.clone();
-	    let mut vxs = Vec::new();
-	    let mut vys = Vec::new();
-	    for i in 0..300 {
-		vxs.push(((i-150) as f64)/150.0);
-		vys.push(((i-150) as f64)/150.0);		
-	    }
+            let mut vxs = Vec::new();
+            let mut vys = Vec::new();
+            for i in 0..300 {
+                vxs.push(((i - 150) as f64) / 150.0);
+                vys.push(((i - 150) as f64) / 150.0);
+            }
             points_n.truncate(size);
             b.iter(|| {
                 black_box(cluster_grid_search(
                     black_box(&points_n.clone()),
-		    vxs.clone(),
-		    vys.clone(),
+                    vxs.clone(),
+                    vys.clone(),
                     ClusterAlgorithm::DbscanRStar,
                     0.02,
                     4,
-		    8,
+                    8,
                 ))
             });
         });
