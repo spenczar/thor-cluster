@@ -9,6 +9,7 @@ use arrow::error::ArrowError;
 use arrow::pyarrow::{FromPyArrow, PyArrowException, ToPyArrow};
 
 mod dbscan;
+pub mod gridsearch;
 mod hotspot2d;
 pub mod points;
 use dbscan::fixed16_kdtree;
@@ -89,7 +90,7 @@ fn find_clusters_py(
         })
         .collect::<Vec<_>>();
 
-    let cluster_labels = find_clusters(points, eps, min_cluster_size, alg);
+    let cluster_labels = find_clusters(&points, eps, min_cluster_size, &alg);
 
     // Convert the clusters into an arrow list of uint32 arrays.
     let mut builder = Int32Builder::new();
@@ -99,10 +100,10 @@ fn find_clusters_py(
 }
 
 pub fn find_clusters(
-    points: Vec<XYPoint<f64>>,
+    points: &Vec<XYPoint<f64>>,
     eps: f64,
     min_cluster_size: usize,
-    alg: ClusterAlgorithm,
+    alg: &ClusterAlgorithm,
 ) -> Vec<i32> {
     match alg {
         ClusterAlgorithm::Hotspot2D => {
@@ -136,7 +137,7 @@ mod tests {
             XYPoint::new(2.0, 0.0),
             XYPoint::new(2.0, 0.0),
         ];
-        let clusters = find_clusters(points, 1.0, 4, ClusterAlgorithm::Hotspot2D);
+        let clusters = find_clusters(&points, 1.0, 4, &ClusterAlgorithm::Hotspot2D);
         let expect = vec![-1, -1, -1, -1, 0, 0, 0, 0];
         assert_eq!(clusters, expect);
     }
@@ -153,7 +154,7 @@ mod tests {
             XYPoint::new(2.0, 0.0),
             XYPoint::new(2.0, 0.0),
         ];
-        let clusters = find_clusters(points, 1.0, 4, ClusterAlgorithm::DBSCAN);
+        let clusters = find_clusters(&points, 1.0, 4, &ClusterAlgorithm::DBSCAN);
         let allowed = vec![vec![1, 1, 1, 1, 2, 2, 2, 2], vec![2, 2, 2, 2, 1, 1, 1, 1]];
         assert!(allowed.contains(&clusters));
     }
@@ -170,7 +171,7 @@ mod tests {
             XYPoint::new(2.0, 0.0),
             XYPoint::new(2.0, 0.0),
         ];
-        let clusters = find_clusters(points, 1.0, 2, ClusterAlgorithm::DBSCAN);
+        let clusters = find_clusters(&points, 1.0, 2, &ClusterAlgorithm::DBSCAN);
         let allowed = vec![vec![1, 1, 1, 1, 2, 2, 2, 2], vec![2, 2, 2, 2, 1, 1, 1, 1]];
         assert!(allowed.contains(&clusters));
     }

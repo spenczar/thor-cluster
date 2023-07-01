@@ -2,12 +2,12 @@ use crate::points::XYPoint;
 use std::collections::HashMap;
 
 pub fn find_clusters_hotspot2d(
-    points: Vec<XYPoint<f64>>,
+    points: &Vec<XYPoint<f64>>,
     eps: f64,
     min_cluster_size: usize,
 ) -> Vec<i32> {
     // Run 4 times with different quantization to catch near misses.
-    let quantized1 = quantize(&points, eps);
+    let quantized1 = quantize(points, eps);
     let map1 = hist2d(&quantized1);
     let labels1 = label_cluster_map(&quantized1, map1, min_cluster_size);
 

@@ -17,13 +17,13 @@ pub trait SearchTree {
 }
 
 pub fn find_clusters<T: SearchTree>(
-    points: Vec<XYPoint<f64>>,
+    points: &Vec<XYPoint<f64>>,
     eps: f64,
     min_cluster_size: usize,
 ) -> Vec<i32> {
-    let tree: T = T::from_points(&points);
+    let tree: T = T::from_points(points);
 
-    let labels = dbscan(&points, &tree, eps, min_cluster_size);
+    let labels = dbscan(points, &tree, eps, min_cluster_size);
     labels
         .iter()
         .map(|label| match label {
