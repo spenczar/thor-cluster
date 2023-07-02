@@ -4,9 +4,9 @@ use std::sync::mpsc::channel;
 use std::thread;
 
 pub struct GridSearchResult {
-    vx: f64,
-    vy: f64,
-    cluster_labels: Vec<i32>,
+    pub vx: f64,
+    pub vy: f64,
+    pub cluster_labels: Vec<i32>,
 }
 
 fn apply_velocity(vx: f64, vy: f64, points: &Vec<XYTPoint<f64>>) -> Vec<XYPoint<f64>> {

@@ -1,12 +1,19 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use pyo3::prelude::{
     pyclass, pyfunction, pymodule, Py, PyAny, PyErr, PyModule, PyObject, PyResult, Python,
 };
-use pyo3::types::{PyFloat, PyInt};
+use pyo3::types::{PyFloat, PyInt, PyTuple};
 use pyo3::wrap_pyfunction;
 
-use arrow::array::{make_array, Array, ArrayData, Float64Array, Int32Builder};
+use arrow::array::{make_array, Array, ArrayData, Float64Array, Int32Builder, StringBuilder, Float64Builder, StringArray};
+use arrow::datatypes::{DataType, Field, Schema};
 use arrow::error::ArrowError;
 use arrow::pyarrow::{FromPyArrow, PyArrowException, ToPyArrow};
+use arrow::record_batch::RecordBatch;
+
+use uuid;
 
 mod dbscan;
 pub mod gridsearch;
@@ -16,7 +23,7 @@ use dbscan::fixed16_kdtree;
 use dbscan::float32_kdtree;
 use dbscan::rstar;
 
-pub use points::XYPoint;
+pub use points::{XYPoint, XYTPoint};
 
 fn to_py_err(err: ArrowError) -> PyErr {
     PyArrowException::new_err(err.to_string())
@@ -29,6 +36,240 @@ pub enum ClusterAlgorithm {
     Hotspot2D = 2,
     DbscanRStar = 3,
     DbscanFixed16 = 4,
+}
+
+/// Clusters X-Y points, searching across a grid of possibly vx and vy values.
+///
+/// Arguments:
+///     ids: A list of observation IDs as a StringArray.
+///     xs: A list of x coordinates as a Float64Array.
+///     ys: A list of y coordinates as a Float64Array.
+///     dts: A list of time deltas as a Float64Array. These are the time deltas between
+///          the point and the minimum time in the dataset, in MJD.
+///     vxs: A list of possible x velocities as a Float64Array.
+///     vys: A list of possible y velocities as a Float64Array.
+///     eps: The maximum distance between two points for them to be considered in the same
+///          neighborhood.
+///     min_cluster_size: The minimum number of points in a cluster.
+///     n_threads: The number of threads to use for clustering.
+///     alg: The clustering algorithm to use.
+///
+/// Returns:
+///     A pair of RecordBatches.
+///     The first summarizes all of the clusters. It has the following schema:
+///         cluster_id: string
+///         vx: float64
+///         vy: float64
+///         arc_length: float64
+///
+///     The second contains the cluster assignments for each point. It
+///     has the following schema:
+///         cluster_id: string
+///         obs_id: string
+#[pyfunction]
+#[pyo3(name= "grid_search")]
+fn grid_search_py(
+    ids: &PyAny,
+    xs: &PyAny,
+    ys: &PyAny,
+    dts: &PyAny,
+    vxs: &PyAny,
+    vys: &PyAny,
+    eps: &PyFloat,
+    min_cluster_size: &PyInt,
+    n_threads: &PyInt,
+    alg: Py<ClusterAlgorithm>,
+    py: Python,
+) -> PyResult<PyObject> {
+    // Handle the Python-to-rust conversion up front
+    let ids = make_array(ArrayData::from_pyarrow(ids)?);
+    let ids = ids
+		.as_any()
+		.downcast_ref::<StringArray>()
+		.ok_or_else(|| ArrowError::ParseError("Expects a string array".to_string()))
+		.map_err(to_py_err)?;
+    
+    let xs = make_array(ArrayData::from_pyarrow(xs)?);
+
+    let xs = xs
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .ok_or_else(|| ArrowError::ParseError("Expects a float64 array".to_string()))
+        .map_err(to_py_err)?;
+
+    let ys = make_array(ArrayData::from_pyarrow(ys)?);
+
+    let ys = ys
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .ok_or_else(|| ArrowError::ParseError("Expects a float64 array".to_string()))
+        .map_err(to_py_err)?;
+
+    let dts = make_array(ArrayData::from_pyarrow(dts)?);
+    let dts = dts
+	.as_any()
+	.downcast_ref::<Float64Array>()
+	.ok_or_else(|| ArrowError::ParseError("Expects a float64 array".to_string()))
+	.map_err(to_py_err)?;
+    
+    if xs.len() != ys.len() || xs.len() != dts.len() {
+        return Err(PyArrowException::new_err(
+            "x y, and dts arrays must be the same length",
+        ));
+    }
+
+    let vxs = make_array(ArrayData::from_pyarrow(vxs)?);
+    let vxs = vxs
+	.as_any()
+	.downcast_ref::<Float64Array>()
+	.ok_or_else(|| ArrowError::ParseError("Expects a float64 array".to_string()))
+	.map_err(to_py_err)?;
+
+    let vys = make_array(ArrayData::from_pyarrow(vys)?);
+    let vys = vys
+	.as_any()
+	.downcast_ref::<Float64Array>()
+	.ok_or_else(|| ArrowError::ParseError("Expects a float64 array".to_string()))
+	.map_err(to_py_err)?;
+
+    let eps = eps.extract::<f64>()?;
+    let min_cluster_size = min_cluster_size.extract::<u8>()? as usize;
+    let alg = alg.extract::<ClusterAlgorithm>(py)?;
+    let n_threads = n_threads.extract::<usize>()?;
+
+    // Turn xs ys, and dts into Vec<XYTPoint> for easier processing.
+    let points = xs
+        .iter()
+	.zip(ys.iter())
+	.zip(dts.iter())
+	.map(|((x, y), dt)| XYTPoint::new(x.unwrap_or(0.0), y.unwrap_or(0.0), dt.unwrap_or(0.0)))
+	.collect::<Vec<_>>();
+
+    // Turn vxs and vys into Vec<f64> for easier processing.
+    let vxs = vxs
+	.iter()
+	.map(|x| x.unwrap_or(0.0))
+	.collect::<Vec<_>>();
+    let vys = vys
+	.iter()
+	.map(|x| x.unwrap_or(0.0))
+	.collect::<Vec<_>>();
+	
+    let results = gridsearch::cluster_grid_search(
+	&points,
+	vxs,
+	vys,
+	alg,
+	eps,
+	min_cluster_size,
+	n_threads,
+    );
+
+    // Result shape is a pair of values.
+    // 
+    // The first value is a table of cluster ID, vx, vy, and arc length (difference between min and max dt).
+    //
+    // The second value is a table of cluster IDs and observation IDs.
+    let cluster_table_schema = Schema ::new (vec![
+	Field::new("cluster_id", DataType::Utf8, false),
+	Field::new("vx", DataType::Float64, false),
+	Field::new("vy", DataType::Float64, false),
+	Field::new("arc_length", DataType::Float64, false),
+    ]);
+
+    let cluster_members_table_schema = Schema::new(vec![
+	Field::new("cluster_id", DataType::Utf8, false),
+	Field::new("obs_id", DataType::Utf8, false),
+    ]);
+
+    // Assemble the arrays.
+    let mut cluster_id_builder = StringBuilder::new();
+    let mut  vx_builder = Float64Builder::new();
+    let mut vy_builder = Float64Builder::new();
+    let mut  arc_length_builder = Float64Builder::new();
+
+    let mut cluster_id_members_builder = StringBuilder::new();
+    let mut obs_id_members_builder = StringBuilder::new();
+
+    for result in results.into_iter() {
+	let mut label_id_map: HashMap<i32, uuid::Uuid> = HashMap::new();
+	let mut cluster_arc_starts: HashMap<uuid::Uuid, f64> = HashMap::new();
+	let mut cluster_arc_ends: HashMap<uuid::Uuid, f64> = HashMap::new();
+	let mut cluster_ids = Vec::new();
+	for (i, label) in result.cluster_labels.iter().enumerate() {
+	    println!("label: {}", label);
+	    if *label < 0 {
+		continue;
+	    }
+	    let cluster_id = match label_id_map.get(label) {
+		Some(val) => *val,
+		None => {
+		    let val = uuid::Uuid::new_v4();
+		    label_id_map.insert(*label, val);
+		    cluster_ids.push(val);
+		    vx_builder.append_value(result.vx);
+		    vy_builder.append_value(result.vy);
+		    val
+		}
+	    };
+	    cluster_id_members_builder.append_value(cluster_id.as_hyphenated().to_string());
+	    obs_id_members_builder.append_value(ids.value(i));
+	    // Keep track of max/min dt for each cluster.
+	    let dt = dts.value(i);
+	    match cluster_arc_starts.get(&cluster_id) {
+		Some(val) => {
+		    if dt < *val {
+			cluster_arc_starts.insert(cluster_id, dt);
+		    }
+		}
+		None => {
+		    cluster_arc_starts.insert(cluster_id, dt);
+		}
+	    };
+	    match cluster_arc_ends.get(&cluster_id) {
+		Some(val) => {
+		    if dt > *val {
+			cluster_arc_ends.insert(cluster_id, dt);
+		    }
+		}
+		None => {
+		    cluster_arc_ends.insert(cluster_id, dt);
+		}
+	    }
+	}
+	// Now that we've processed all the points, we can add the arc lengths.
+	for cluster_id in cluster_ids.iter() {
+	    cluster_id_builder.append_value(cluster_id.as_hyphenated().to_string());
+	    let arc_length = cluster_arc_ends.get(cluster_id).unwrap() - cluster_arc_starts.get(cluster_id).unwrap();
+	    arc_length_builder.append_value(arc_length);
+	}
+    };
+
+    // Build the tables (as RecordBatches)
+    let cluster_table = RecordBatch::try_new(
+	Arc::new(cluster_table_schema),
+	vec![
+	    Arc::new(cluster_id_builder.finish()),
+	    Arc::new(vx_builder.finish()),
+	    Arc::new(vy_builder.finish()),
+	    Arc::new(arc_length_builder.finish()),
+	],
+    ).map_err(to_py_err)?;
+
+    let cluster_members_table = RecordBatch::try_new(
+	Arc::new(cluster_members_table_schema),
+	vec![
+	    Arc::new(cluster_id_members_builder.finish()),
+	    Arc::new(obs_id_members_builder.finish()),
+	],
+    ).map_err(to_py_err)?;
+
+    // Convert to Python objects for output
+    let cluster_table = cluster_table.to_pyarrow(py)?;
+    let cluster_members_table = cluster_members_table.to_pyarrow(py)?;
+
+    // Combine into a tuple.
+    Ok(PyTuple::new(py, vec![cluster_table, cluster_members_table]).into())
 }
 
 /// Find clusters of related x-y points.
@@ -181,6 +422,7 @@ mod tests {
 #[pymodule]
 fn thor_cluster(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_clusters_py, m)?)?;
+    m.add_function(wrap_pyfunction!(grid_search_py, m)?)?;
     m.add_class::<ClusterAlgorithm>()?;
     Ok(())
 }
