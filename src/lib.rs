@@ -186,7 +186,6 @@ fn grid_search_py(
         let mut cluster_arc_ends: HashMap<uuid::Uuid, f64> = HashMap::new();
         let mut cluster_ids = Vec::new();
         for (i, label) in result.cluster_labels.iter().enumerate() {
-            println!("label: {}", label);
             if *label < 0 {
                 continue;
             }
