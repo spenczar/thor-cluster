@@ -49,7 +49,11 @@ pub fn cluster_grid_search(
         let alg = alg.clone();
         let eps = eps.clone();
         let min_cluster_size = min_cluster_size.clone();
-        handles.push(thread::spawn(move || {
+
+        let thread_name = format!("grid_search_{}", _i);
+        let threadbuilder = thread::Builder::new().name(thread_name);
+
+        let handle = threadbuilder.spawn(move || {
             for vx in vx_chunk.iter() {
                 for vy in &vys {
                     let xy_points = apply_velocity(*vx, *vy, &points);
@@ -62,7 +66,8 @@ pub fn cluster_grid_search(
                     tx.send(result).unwrap();
                 }
             }
-        }));
+        });
+        handles.push(handle.unwrap());
     }
     drop(tx);
     let mut results = Vec::new();
