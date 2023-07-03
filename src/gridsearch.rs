@@ -53,7 +53,10 @@ pub fn cluster_grid_search(
         let thread_name = format!("grid_search_{}", _i);
         let threadbuilder = thread::Builder::new().name(thread_name);
 
+        let core_ids = core_affinity::get_core_ids().unwrap();
+        let core_id = core_ids[_i % core_ids.len()];
         let handle = threadbuilder.spawn(move || {
+            core_affinity::set_for_current(core_id);
             for vx in vx_chunk.iter() {
                 for vy in &vys {
                     let xy_points = apply_velocity(*vx, *vy, &points);

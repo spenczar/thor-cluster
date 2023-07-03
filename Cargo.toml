@@ -9,6 +9,7 @@ name = "thor_cluster"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+core_affinity = "0.8.0"
 fixed = "1.23.1"
 kiddo = { version = "2.1.1", features = ["simd"] }
 libc = "0.2.147"
