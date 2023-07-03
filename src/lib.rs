@@ -169,7 +169,7 @@ fn grid_search_py(
 
     let cluster_members_table_schema = Schema::new(vec![
         Field::new("cluster_id", DataType::UInt32, false),
-        Field::new_dictionary("obs_id", DataType::UInt32, DataType::Utf8, false),
+        Field::new_dictionary("obs_id", DataType::Int32, DataType::Utf8, false),
     ]);
 
     // Assemble the arrays.
