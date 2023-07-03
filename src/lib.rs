@@ -9,9 +9,10 @@ use pyo3::wrap_pyfunction;
 
 use arrow::array::{
     make_array, Array, ArrayData, Float64Array, Float64Builder, Int32Builder, StringArray,
-    StringBuilder,
+    DictionaryArray, StringDictionaryBuilder,
+    StringBuilder, UInt32Builder,
 };
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType, Field, Schema, Int32Type};
 use arrow::error::ArrowError;
 use arrow::pyarrow::{FromPyArrow, PyArrowException, ToPyArrow};
 use arrow::record_batch::RecordBatch;
@@ -160,30 +161,31 @@ fn grid_search_py(
     //
     // The second value is a table of cluster IDs and observation IDs.
     let cluster_table_schema = Schema::new(vec![
-        Field::new("cluster_id", DataType::Utf8, false),
+        Field::new("cluster_id", DataType::UInt32, false),
         Field::new("vx", DataType::Float64, false),
         Field::new("vy", DataType::Float64, false),
         Field::new("arc_length", DataType::Float64, false),
     ]);
 
     let cluster_members_table_schema = Schema::new(vec![
-        Field::new("cluster_id", DataType::Utf8, false),
-        Field::new("obs_id", DataType::Utf8, false),
+        Field::new("cluster_id", DataType::UInt32, false),
+        Field::new_dictionary("obs_id", DataType::UInt32, DataType::Utf8, false),
     ]);
 
     // Assemble the arrays.
-    let mut cluster_id_builder = StringBuilder::new();
+    let mut cluster_id_builder = UInt32Builder::new();
     let mut vx_builder = Float64Builder::new();
     let mut vy_builder = Float64Builder::new();
     let mut arc_length_builder = Float64Builder::new();
 
-    let mut cluster_id_members_builder = StringBuilder::new();
-    let mut obs_id_members_builder = StringBuilder::new();
+    let mut cluster_id_members_builder = UInt32Builder::new();
+    let mut obs_id_members_builder = StringDictionaryBuilder::<Int32Type>::new();
 
+    let mut cluster_id: u32 = 0;
     for result in results.into_iter() {
-        let mut label_id_map: HashMap<i32, uuid::Uuid> = HashMap::new();
-        let mut cluster_arc_starts: HashMap<uuid::Uuid, f64> = HashMap::new();
-        let mut cluster_arc_ends: HashMap<uuid::Uuid, f64> = HashMap::new();
+        let mut label_id_map: HashMap<i32, u32> = HashMap::new();
+        let mut cluster_arc_starts: HashMap<u32, f64> = HashMap::new();
+        let mut cluster_arc_ends: HashMap<u32, f64> = HashMap::new();
         let mut cluster_ids = Vec::new();
         for (i, label) in result.cluster_labels.iter().enumerate() {
             if *label < 0 {
@@ -192,7 +194,8 @@ fn grid_search_py(
             let cluster_id = match label_id_map.get(label) {
                 Some(val) => *val,
                 None => {
-                    let val = uuid::Uuid::new_v4();
+                    let val = cluster_id + 1;
+		    cluster_id += 1;
                     label_id_map.insert(*label, val);
                     cluster_ids.push(val);
                     vx_builder.append_value(result.vx);
@@ -200,7 +203,7 @@ fn grid_search_py(
                     val
                 }
             };
-            cluster_id_members_builder.append_value(cluster_id.as_hyphenated().to_string());
+            cluster_id_members_builder.append_value(cluster_id);
             obs_id_members_builder.append_value(ids.value(i));
             // Keep track of max/min dt for each cluster.
             let dt = dts.value(i);
@@ -227,7 +230,7 @@ fn grid_search_py(
         }
         // Now that we've processed all the points, we can add the arc lengths.
         for cluster_id in cluster_ids.iter() {
-            cluster_id_builder.append_value(cluster_id.as_hyphenated().to_string());
+            cluster_id_builder.append_value(*cluster_id);
             let arc_length = cluster_arc_ends.get(cluster_id).unwrap()
                 - cluster_arc_starts.get(cluster_id).unwrap();
             arc_length_builder.append_value(arc_length);
