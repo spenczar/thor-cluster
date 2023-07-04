@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use kiddo::distance::squared_euclidean;
+use kiddo::float::distance::manhattan;
 use kiddo::float::kdtree;
 use ordered_float::OrderedFloat;
 
@@ -184,7 +184,7 @@ impl ThorSubtree {
 
     pub fn neighbor_points(&self, point: &XYPoint32, radius: f32) -> Vec<&XYPoint32> {
         self.point_index
-            .within_unsorted(&[point.x, point.y], radius, &squared_euclidean)
+            .within_unsorted(&[point.x, point.y], radius, &manhattan)
             .iter()
             .map(|neighbor| self.points.get(neighbor.item).unwrap())
             .collect()
@@ -192,7 +192,7 @@ impl ThorSubtree {
 
     pub fn neighbor_indexes(&self, point: &XYPoint32, radius: f32) -> Vec<usize> {
         self.point_index
-            .within_unsorted(&[point.x, point.y], radius, &squared_euclidean)
+            .within_unsorted(&[point.x, point.y], radius, &manhattan)
             .iter()
             .map(|neighbor| neighbor.item)
             .collect()
