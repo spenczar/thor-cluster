@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::{
     pyclass, pyfunction, pymodule, Py, PyAny, PyErr, PyModule, PyObject, PyResult, Python,
 };
@@ -8,16 +9,14 @@ use pyo3::types::{PyFloat, PyInt, PyTuple};
 use pyo3::wrap_pyfunction;
 
 use arrow::array::{
-    make_array, Array, ArrayData, Float64Array, Float64Builder, Int32Builder, StringArray,
-    DictionaryArray, StringDictionaryBuilder,
-    StringBuilder, UInt32Builder,
+    make_array, Array, ArrayData, ArrowPrimitiveType, AsArray, DictionaryArray, Float64Array,
+    Float64Builder, Int32Builder, PrimitiveArray, StringArray, StringBuilder,
+    StringDictionaryBuilder, UInt32Builder,
 };
-use arrow::datatypes::{DataType, Field, Schema, Int32Type};
+use arrow::datatypes::{DataType, Field, Float64Type, Int32Type, Schema};
 use arrow::error::ArrowError;
 use arrow::pyarrow::{FromPyArrow, PyArrowException, ToPyArrow};
 use arrow::record_batch::RecordBatch;
-
-use uuid;
 
 mod dbscan;
 pub mod gridsearch;
@@ -31,6 +30,40 @@ pub use points::{XYPoint, XYTPoint};
 
 fn to_py_err(err: ArrowError) -> PyErr {
     PyArrowException::new_err(err.to_string())
+}
+
+fn as_primitive_array<T: ArrowPrimitiveType>(
+    val: &PyAny,
+    param_name: &str,
+) -> PyResult<PrimitiveArray<T>> {
+    let array_data = ArrayData::from_pyarrow(val)?;
+    if array_data.data_type() != &T::DATA_TYPE {
+        return Err(PyTypeError::new_err(format!(
+            "{}: unexpected array type, expected {:?} but got {:?}",
+            param_name,
+            T::DATA_TYPE,
+            array_data.data_type()
+        )));
+    }
+
+    Ok(PrimitiveArray::<T>::from(array_data))
+}
+
+fn as_float_array(val: &PyAny, param_name: &str) -> PyResult<Float64Array> {
+    as_primitive_array::<Float64Type>(val, param_name)
+}
+
+fn as_string_array(val: &PyAny, param_name: &str) -> PyResult<StringArray> {
+    let array_data = ArrayData::from_pyarrow(val)?;
+    if array_data.data_type() != &DataType::Utf8 {
+        return Err(PyTypeError::new_err(format!(
+            "{}: unexpected array type, expected string but got {:?}",
+            param_name,
+            array_data.data_type()
+        )));
+    }
+
+    Ok(StringArray::from(array_data))
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -92,13 +125,7 @@ fn grid_search_py(
         .ok_or_else(|| ArrowError::ParseError("Expects a string array".to_string()))
         .map_err(to_py_err)?;
 
-    let xs = make_array(ArrayData::from_pyarrow(xs)?);
-
-    let xs = xs
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .ok_or_else(|| ArrowError::ParseError("Expects a float64 array".to_string()))
-        .map_err(to_py_err)?;
+    let xs = as_float_array(xs, "invalid value for xs")?;
 
     let ys = make_array(ArrayData::from_pyarrow(ys)?);
 
@@ -195,7 +222,7 @@ fn grid_search_py(
                 Some(val) => *val,
                 None => {
                     let val = cluster_id + 1;
-		    cluster_id += 1;
+                    cluster_id += 1;
                     label_id_map.insert(*label, val);
                     cluster_ids.push(val);
                     vx_builder.append_value(result.vx);
@@ -289,21 +316,8 @@ fn find_clusters_py(
     py: Python,
 ) -> PyResult<PyObject> {
     // Handle the Python-to-rust conversion up front
-    let xs = make_array(ArrayData::from_pyarrow(xs)?);
-
-    let xs = xs
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .ok_or_else(|| ArrowError::ParseError("Expects a float64 array".to_string()))
-        .map_err(to_py_err)?;
-
-    let ys = make_array(ArrayData::from_pyarrow(ys)?);
-
-    let ys = ys
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .ok_or_else(|| ArrowError::ParseError("Expects a float64 array".to_string()))
-        .map_err(to_py_err)?;
+    let xs = as_float_array(xs, "xs")?;
+    let ys = as_float_array(ys, "ys")?;
 
     if xs.len() != ys.len() {
         return Err(PyArrowException::new_err(
@@ -327,7 +341,7 @@ fn find_clusters_py(
 
     let cluster_labels = find_clusters(&points, eps, min_cluster_size, &alg);
 
-    // Convert the clusters into an arrow list of uint32 arrays.
+    // Convert the clusters into an arrow list of int32
     let mut builder = Int32Builder::new();
     builder.append_slice(&cluster_labels[..]);
     let la = builder.finish();

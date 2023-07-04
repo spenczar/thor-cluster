@@ -6,7 +6,7 @@ import csv
 def test_thorcluster():
     x = pa.array([1.0, 2.0, 3.0, 1.0, 1.0, 1.0], type=pa.float64())
     y = pa.array([4.0, 5.0, 6.0, 4.1, 3.9, 3.8], type=pa.float64())
-    have = thor_cluster.find_clusters(x, y, 1.0, 4)
+    have = thor_cluster.find_clusters(x, y, 1.0, 4, thor_cluster.ClusterAlgorithm.DBSCAN)
     want = pa.array([0, -1, -1, 0, 0, 0], type=pa.int32())
     assert have == (want)
 
@@ -18,7 +18,7 @@ def test_thorcluster_benchmark(benchmark, benchmark_data, n):
     x_array = data["x"][0:n]
     y_array = data["y"][0:n]
     
-    benchmark(thor_cluster.find_clusters, xs=x_array, ys=y_array, eps=0.02, min_cluster_size=4)
+    benchmark(thor_cluster.find_clusters, xs=x_array, ys=y_array, eps=0.02, min_cluster_size=4, alg=thor_cluster.ClusterAlgorithm.DBSCAN)
 
 
 @pytest.fixture(scope="session")
@@ -43,3 +43,5 @@ def benchmark_data():
         "y": y_array,
         "dt": dt_array,
     }
+
+
