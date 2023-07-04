@@ -1,3 +1,5 @@
+use log::{trace, debug};
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -9,11 +11,11 @@ use pyo3::types::{PyFloat, PyInt, PyTuple};
 use pyo3::wrap_pyfunction;
 
 use arrow::array::{
-    make_array, Array, ArrayData, ArrowPrimitiveType, AsArray, DictionaryArray, Float64Array,
-    Float64Builder, Int32Builder, PrimitiveArray, StringArray, StringBuilder,
-    StringDictionaryBuilder, UInt32Builder,
+    make_array, Array, ArrayBuilder, ArrayData, ArrowPrimitiveType, AsArray, DictionaryArray,
+    Float32Builder, Float64Array, Float64Builder, Int32Builder, ListBuilder, PrimitiveArray,
+    StringArray, StringBuilder, StringDictionaryBuilder, StructBuilder, UInt32Builder,
 };
-use arrow::datatypes::{DataType, Field, Float64Type, Int32Type, Schema};
+use arrow::datatypes::{DataType, Field, Fields, Float64Type, Int32Type, Schema};
 use arrow::error::ArrowError;
 use arrow::pyarrow::{FromPyArrow, PyArrowException, ToPyArrow};
 use arrow::record_batch::RecordBatch;
@@ -25,6 +27,8 @@ pub mod points;
 use dbscan::fixed16_kdtree;
 use dbscan::float32_kdtree;
 use dbscan::rstar;
+
+pub mod cellsearch;
 
 pub use points::{XYPoint, XYTPoint};
 
@@ -370,6 +374,134 @@ pub fn find_clusters(
     }
 }
 
+#[pyfunction]
+#[pyo3(name = "cellsearch")]
+fn cellsearch_py(
+    ids: &PyAny,
+    xs: &PyAny,
+    ys: &PyAny,
+    dts: &PyAny,
+    vxs: &PyAny,
+    vys: &PyAny,
+    eps: &PyFloat,
+    min_cluster_size: &PyInt,
+    py: Python,
+) -> PyResult<PyObject> {
+    // Handle the Python-to-rust conversion up front
+    let ids = as_string_array(ids, "ids")?;
+    let xs = as_float_array(xs, "xs")?;
+    let ys = as_float_array(ys, "ys")?;
+    let dts = as_float_array(dts, "dts")?;
+
+    if xs.len() != ys.len() || xs.len() != dts.len() {
+        return Err(PyArrowException::new_err(
+            "x y, and dts arrays must be the same length",
+        ));
+    }
+
+    let vxs = as_float_array(vxs, "vxs")?;
+    let vys = as_float_array(vys, "vys")?;
+
+    let eps = eps.extract::<f64>()?;
+    let min_cluster_size = min_cluster_size.extract::<u8>()? as usize;
+
+    // Turn xs ys, and dts into Vec<XYPoint> for easier processing.
+    let mut cell = cellsearch::ThorCell::new();
+
+    for (i, x) in xs.into_iter().enumerate() {
+        let x = x.unwrap_or(0.0) as f32;
+        let y = ys.value(i) as f32;
+        let dt = dts.value(i) as f32;
+        cell.add_point(dt, XYPoint { x, y });
+    }
+
+    let points_fields = Fields::from(vec![
+        Field::new("x", DataType::Float32, false),
+        Field::new("y", DataType::Float32, false),
+        Field::new("dt", DataType::Float32, false),
+    ]);
+
+    let clusters_fields = Fields::from(vec![
+        Field::new("vx", DataType::Float32, false),
+        Field::new("vy", DataType::Float32, false),
+        Field::new_list(
+            "points",
+            Field::new_struct("item", points_fields.clone(), true),
+            false,
+        ),
+    ]);
+
+    let mut points_builder = StructBuilder::new(
+        points_fields,
+        vec![
+            Box::new(Float32Builder::new()) as Box<dyn ArrayBuilder>,
+            Box::new(Float32Builder::new()) as Box<dyn ArrayBuilder>,
+            Box::new(Float32Builder::new()) as Box<dyn ArrayBuilder>,
+        ],
+    );
+    let mut vx_builder = Float32Builder::new();
+    let mut vy_builder = Float32Builder::new();
+    let mut cluster_list_builder = ListBuilder::new(points_builder);
+
+    for (i, vx) in vxs.into_iter().enumerate() {
+        for (j, vy) in vys.into_iter().enumerate() {
+            let vx = vx.unwrap_or(0.0) as f32;
+            let vy = vy.unwrap_or(0.0) as f32;
+	    debug!("cellsearch vx={}, vy={}", vx, vy);
+            let clusters_vxvy = cell.find_clusters(eps as f32, min_cluster_size, vx, vy);
+	    debug!("found {} clusters", clusters_vxvy.len());
+            for (k, cluster) in clusters_vxvy.into_iter().enumerate() {
+		if cluster.len() < min_cluster_size {
+		    continue;
+		}
+                for (l, point) in cluster.into_iter().enumerate() {
+		    // Jesus, this is a mess.
+                    cluster_list_builder
+                        .values()
+                        .field_builder::<Float32Builder>(0)
+                        .unwrap()
+                        .append_value(point.x);
+                    cluster_list_builder
+                        .values()
+                        .field_builder::<Float32Builder>(1)
+                        .unwrap()
+                        .append_value(point.y);
+                    cluster_list_builder
+                        .values()
+                        .field_builder::<Float32Builder>(2)
+                        .unwrap()
+                        .append_value(point.t);
+		    cluster_list_builder.values().append(true);
+                }
+		vx_builder.append_value(vx);
+		vy_builder.append_value(vy);
+                cluster_list_builder.append(true);
+            }
+        }
+    }
+
+    debug!("building table");
+    debug!("vx_builder.len() = {}", vx_builder.len());
+    debug!("vy_builder.len() = {}", vy_builder.len());
+    debug!("cluster_list_builder.len() = {}", cluster_list_builder.len());
+    debug!("cluster_list_builder.values().len() = {}", cluster_list_builder.values().len());
+    debug!("cluster_list_builder.values().field_builder(0).len() = {}", cluster_list_builder.values().field_builder::<Float32Builder>(0).unwrap().len());
+    debug!("cluster_list_builder.values().field_builder(1).len() = {}", cluster_list_builder.values().field_builder::<Float32Builder>(1).unwrap().len());
+    debug!("cluster_list_builder.values().field_builder(2).len() = {}", cluster_list_builder.values().field_builder::<Float32Builder>(2).unwrap().len());
+    
+    let table = RecordBatch::try_new(
+        Arc::new(Schema::new(clusters_fields)),
+        vec![
+            Arc::new(vx_builder.finish()),
+            Arc::new(vy_builder.finish()),
+            Arc::new(cluster_list_builder.finish()),
+        ],
+    )
+    .map_err(to_py_err)?;
+
+    table.to_pyarrow(py)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,8 +561,10 @@ mod tests {
 /// A Python module implemented in Rust.
 #[pymodule]
 fn thor_cluster(_py: Python, m: &PyModule) -> PyResult<()> {
+    pyo3_log::init();
     m.add_function(wrap_pyfunction!(find_clusters_py, m)?)?;
     m.add_function(wrap_pyfunction!(grid_search_py, m)?)?;
+    m.add_function(wrap_pyfunction!(cellsearch_py, m)?)?;
     m.add_class::<ClusterAlgorithm>()?;
     Ok(())
 }
