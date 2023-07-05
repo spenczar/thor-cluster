@@ -1414,6 +1414,7 @@ dependencies = [
  "ordered-float",
  "pyo3",
  "pyo3-log",
+ "rayon",
  "rstar",
  "serde",
  "uuid",

@@ -17,7 +17,7 @@ impl SearchTree for PointTree {
     }
 
     fn neighbors(&self, point: &XYPoint<f64>, radius: f64) -> Vec<usize> {
-        let eps = radius as f32;
+        let eps = (radius * radius) as f32;
         let neighbors = self.within_unsorted(
             &[point.x as f32, point.y as f32],
             eps,

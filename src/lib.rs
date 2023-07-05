@@ -1,4 +1,4 @@
-use log::{trace, debug};
+use log::debug;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,9 +11,9 @@ use pyo3::types::{PyFloat, PyInt, PyTuple};
 use pyo3::wrap_pyfunction;
 
 use arrow::array::{
-    make_array, Array, ArrayBuilder, ArrayData, ArrowPrimitiveType, AsArray, DictionaryArray,
-    Float32Builder, Float64Array, Float64Builder, Int32Builder, ListBuilder, PrimitiveArray,
-    StringArray, StringBuilder, StringDictionaryBuilder, StructBuilder, UInt32Builder,
+    make_array, Array, ArrayBuilder, ArrayData, ArrowPrimitiveType, Float32Builder, Float64Array,
+    Float64Builder, Int32Builder, ListBuilder, PrimitiveArray, StringArray,
+    StringDictionaryBuilder, StructBuilder, UInt32Builder,
 };
 use arrow::datatypes::{DataType, Field, Fields, Float64Type, Int32Type, Schema};
 use arrow::error::ArrowError;
@@ -388,7 +388,7 @@ fn cellsearch_py(
     py: Python,
 ) -> PyResult<PyObject> {
     // Handle the Python-to-rust conversion up front
-    let ids = as_string_array(ids, "ids")?;
+    let _ids = as_string_array(ids, "ids")?;
     let xs = as_float_array(xs, "xs")?;
     let ys = as_float_array(ys, "ys")?;
     let dts = as_float_array(dts, "dts")?;
@@ -431,7 +431,7 @@ fn cellsearch_py(
         ),
     ]);
 
-    let mut points_builder = StructBuilder::new(
+    let points_builder = StructBuilder::new(
         points_fields,
         vec![
             Box::new(Float32Builder::new()) as Box<dyn ArrayBuilder>,
@@ -443,19 +443,19 @@ fn cellsearch_py(
     let mut vy_builder = Float32Builder::new();
     let mut cluster_list_builder = ListBuilder::new(points_builder);
 
-    for (i, vx) in vxs.into_iter().enumerate() {
-        for (j, vy) in vys.into_iter().enumerate() {
+    for (_i, vx) in vxs.into_iter().enumerate() {
+        for (_j, vy) in vys.into_iter().enumerate() {
             let vx = vx.unwrap_or(0.0) as f32;
             let vy = vy.unwrap_or(0.0) as f32;
-	    debug!("cellsearch vx={}, vy={}", vx, vy);
+            //	    debug!("cellsearch vx={}, vy={}", vx, vy);
             let clusters_vxvy = cell.find_clusters(eps as f32, min_cluster_size, vx, vy);
-	    debug!("found {} clusters", clusters_vxvy.len());
-            for (k, cluster) in clusters_vxvy.into_iter().enumerate() {
-		if cluster.len() < min_cluster_size {
-		    continue;
-		}
-                for (l, point) in cluster.into_iter().enumerate() {
-		    // Jesus, this is a mess.
+            //	    debug!("found {} clusters", clusters_vxvy.len());
+            for (_k, cluster) in clusters_vxvy.into_iter().enumerate() {
+                if cluster.len() < min_cluster_size {
+                    continue;
+                }
+                for (_l, point) in cluster.into_iter().enumerate() {
+                    // Jesus, this is a mess.
                     cluster_list_builder
                         .values()
                         .field_builder::<Float32Builder>(0)
@@ -471,10 +471,10 @@ fn cellsearch_py(
                         .field_builder::<Float32Builder>(2)
                         .unwrap()
                         .append_value(point.t);
-		    cluster_list_builder.values().append(true);
+                    cluster_list_builder.values().append(true);
                 }
-		vx_builder.append_value(vx);
-		vy_builder.append_value(vy);
+                vx_builder.append_value(vx);
+                vy_builder.append_value(vy);
                 cluster_list_builder.append(true);
             }
         }
@@ -483,12 +483,39 @@ fn cellsearch_py(
     debug!("building table");
     debug!("vx_builder.len() = {}", vx_builder.len());
     debug!("vy_builder.len() = {}", vy_builder.len());
-    debug!("cluster_list_builder.len() = {}", cluster_list_builder.len());
-    debug!("cluster_list_builder.values().len() = {}", cluster_list_builder.values().len());
-    debug!("cluster_list_builder.values().field_builder(0).len() = {}", cluster_list_builder.values().field_builder::<Float32Builder>(0).unwrap().len());
-    debug!("cluster_list_builder.values().field_builder(1).len() = {}", cluster_list_builder.values().field_builder::<Float32Builder>(1).unwrap().len());
-    debug!("cluster_list_builder.values().field_builder(2).len() = {}", cluster_list_builder.values().field_builder::<Float32Builder>(2).unwrap().len());
-    
+    debug!(
+        "cluster_list_builder.len() = {}",
+        cluster_list_builder.len()
+    );
+    debug!(
+        "cluster_list_builder.values().len() = {}",
+        cluster_list_builder.values().len()
+    );
+    debug!(
+        "cluster_list_builder.values().field_builder(0).len() = {}",
+        cluster_list_builder
+            .values()
+            .field_builder::<Float32Builder>(0)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "cluster_list_builder.values().field_builder(1).len() = {}",
+        cluster_list_builder
+            .values()
+            .field_builder::<Float32Builder>(1)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "cluster_list_builder.values().field_builder(2).len() = {}",
+        cluster_list_builder
+            .values()
+            .field_builder::<Float32Builder>(2)
+            .unwrap()
+            .len()
+    );
+
     let table = RecordBatch::try_new(
         Arc::new(Schema::new(clusters_fields)),
         vec![
