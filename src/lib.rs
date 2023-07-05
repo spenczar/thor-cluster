@@ -448,7 +448,7 @@ fn cellsearch_py(
             let vx = vx.unwrap_or(0.0) as f32;
             let vy = vy.unwrap_or(0.0) as f32;
             //	    debug!("cellsearch vx={}, vy={}", vx, vy);
-            let clusters_vxvy = cell.find_clusters(eps as f32, min_cluster_size, vx, vy);
+            let clusters_vxvy = cell.find_clusters2(eps as f32, min_cluster_size, vx, vy);
             //	    debug!("found {} clusters", clusters_vxvy.len());
             for (_k, cluster) in clusters_vxvy.into_iter().enumerate() {
                 if cluster.len() < min_cluster_size {

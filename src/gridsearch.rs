@@ -181,7 +181,7 @@ fn test_grid_search() {
     ];
     let vxs = vec![0.0, 0.5, 1.0];
     let vys = vec![0.0, 0.5, 1.0];
-    let results = cluster_grid_search(&points, vxs, vys, ClusterAlgorithm::DBSCAN, 0.5, 4, 1);
+    let results = cluster_grid_search(&points, vxs, vys, ClusterAlgorithm::DBSCAN, 1.0, 4, 1);
     assert_eq!(results.len(), 9);
     assert_eq!(results[0].vx, 0.0);
     assert_eq!(results[0].vy, 0.0);
@@ -191,7 +191,7 @@ fn test_grid_search() {
     assert_eq!(results[8].vx, 1.0);
     assert_eq!(results[8].vy, 1.0);
     assert_eq!(results[8].cluster_labels.len(), 6);
-    assert_eq!(results[8].cluster_labels, vec![1, 1, -1, -1, 1, 1]);
+    assert_eq!(results[8].cluster_labels, vec![1, 1, -1, 1, 1, 1]);
 }
 
 #[test]

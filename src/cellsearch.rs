@@ -1,3 +1,5 @@
+use log::debug;
+
 use std::collections::HashMap;
 
 use kiddo::float::distance::manhattan;
@@ -12,6 +14,13 @@ type XYTPoint32 = XYTPoint<f32>;
 pub struct ThorCell {
     subtrees: Vec<ThorSubtree>,
     dts: HashMap<OrderedFloat<f32>, usize>,
+    sorted_dts: Vec<OrderedFloat<f32>>,
+}
+
+fn sorted_insert(vec: &mut Vec<OrderedFloat<f32>>, val: f32) {
+    let val = OrderedFloat(val);
+    let idx = vec.partition_point(|&x| x < val);
+    vec.insert(idx, val);
 }
 
 impl ThorCell {
@@ -19,6 +28,7 @@ impl ThorCell {
         ThorCell {
             subtrees: Vec::new(),
             dts: HashMap::new(),
+            sorted_dts: Vec::new(),
         }
     }
 
@@ -29,6 +39,7 @@ impl ThorCell {
             }
             None => {
                 self.dts.insert(OrderedFloat(dt), self.subtrees.len());
+                sorted_insert(&mut self.sorted_dts, dt);
                 self.subtrees.push(ThorSubtree::new(dt, vec![point]));
             }
         }
@@ -40,10 +51,96 @@ impl ThorCell {
                 self.subtrees[*subtree_idx].add_points(points);
             }
             None => {
-                self.dts.insert(OrderedFloat(dt), self.subtrees.len());
+                self.sorted_dts.push(OrderedFloat(dt));
+                sorted_insert(&mut self.sorted_dts, dt);
                 self.subtrees.push(ThorSubtree::new(dt, points));
             }
         }
+    }
+
+    pub fn find_clusters2(
+        &self,
+        eps: f32,
+        min_weight: usize,
+        vx: f32,
+        vy: f32,
+    ) -> Vec<Vec<XYTPoint32>> {
+        // The idea is to find all points that are within eps, but only in *later* subtrees.
+
+        // Labels for each point in each subtree
+        let mut labels: Vec<Vec<ClusterClassification>> = self
+            .sorted_dts
+            .iter()
+            .map(|dt| &self.subtrees[self.dts[dt]])
+            .map(|subtree| vec![ClusterClassification::Undefined; subtree.points.len()])
+            .collect();
+
+        let mut cluster_idx: usize = 0;
+
+        // Go in DT order
+        for (i, dt) in self.sorted_dts.iter().enumerate() {
+            let subtree = &self.subtrees[self.dts[&dt]];
+            for (j, point) in subtree.points.iter().enumerate() {
+                if labels[i][j] != ClusterClassification::Undefined {
+                    // Already visited
+                    continue;
+                }
+
+                let mut possible_cluster_points = Vec::new();
+
+                let followers = self.sorted_dts[i..]
+                    .iter()
+                    .enumerate()
+                    .map(|(k, dt)| (k + i, &self.subtrees[self.dts[dt]]));
+                for (k, follower_subtree) in followers {
+                    // Modify point to adjust by velocity
+                    let point = XYPoint32 {
+                        x: point.x + vx * (follower_subtree.dt),
+                        y: point.y + vy * (follower_subtree.dt),
+                    };
+
+                    if let Some(idx) = follower_subtree.nearest_within(&point, eps) {
+                        possible_cluster_points.push((k, idx));
+                        labels[k][idx] = ClusterClassification::Border(cluster_idx);
+                    }
+                }
+
+                if possible_cluster_points.len() < min_weight {
+                    // Too small
+                    labels[i][j] = ClusterClassification::Noise;
+                    for (k, idx) in possible_cluster_points {
+                        labels[k][idx] = ClusterClassification::Noise;
+                    }
+                } else {
+                    // New cluster
+                    cluster_idx += 1;
+                    labels[i][j] = ClusterClassification::Core(cluster_idx);
+                    for (k, idx) in possible_cluster_points {
+                        labels[k][idx] = ClusterClassification::Core(cluster_idx);
+                    }
+                }
+            }
+        }
+        // All points are labeled. Now organize the results.
+        let mut clusters: Vec<Vec<XYTPoint32>> = vec![Vec::new(); cluster_idx];
+
+        for (subtree_idx, subtree_point_classifications) in labels.iter().enumerate() {
+            for (point_idx, point_classification) in
+                subtree_point_classifications.iter().enumerate()
+            {
+                if let ClusterClassification::Core(cluster_idx)
+                | ClusterClassification::Border(cluster_idx) = point_classification
+                {
+                    clusters[*cluster_idx - 1].push(XYTPoint32 {
+                        x: self.subtrees[subtree_idx].points[point_idx].x,
+                        y: self.subtrees[subtree_idx].points[point_idx].y,
+                        t: self.subtrees[subtree_idx].dt,
+                    });
+                }
+            }
+        }
+
+        clusters
     }
 
     pub fn find_clusters(
@@ -53,8 +150,6 @@ impl ThorCell {
         vx: f32,
         vy: f32,
     ) -> Vec<Vec<XYTPoint32>> {
-        // Uses DBSCAN to find clusters in the ThorCell
-
         // Labels for each point in each subtree
         let mut labels: Vec<Vec<ClusterClassification>> = self
             .subtrees
@@ -182,12 +277,15 @@ impl ThorSubtree {
         }
     }
 
-    pub fn neighbor_points(&self, point: &XYPoint32, radius: f32) -> Vec<&XYPoint32> {
-        self.point_index
-            .within_unsorted(&[point.x, point.y], radius, &manhattan)
-            .iter()
-            .map(|neighbor| self.points.get(neighbor.item).unwrap())
-            .collect()
+    pub fn nearest_within(&self, point: &XYPoint32, radius: f32) -> Option<usize> {
+        let (distance, idx) = self
+            .point_index
+            .nearest_one(&[point.x, point.y], &manhattan);
+        if distance < radius {
+            Some(idx)
+        } else {
+            None
+        }
     }
 
     pub fn neighbor_indexes(&self, point: &XYPoint32, radius: f32) -> Vec<usize> {
